@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Salindiwa: Multi-Challenge Game</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f3e9;
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-4">
+
+    <!-- Main Game Container -->
+    <div class="bg-white p-8 rounded-2xl shadow-lg w-full max-w-2xl text-center border-4 border-lime-600">
+        <h1 class="text-4xl font-bold text-lime-600 mb-2">Salindiwa</h1>
+        <h2 class="text-2xl font-bold text-gray-700 mb-6">Multi-Challenge Game</h2>
+
+        <!-- Start Screen -->
+        <div id="start-screen" class="space-y-6">
+            <p class="text-gray-700 text-xl">Test your knowledge of Filipino words, riddles, and proverbs!</p>
+            <p class="text-gray-700 text-lg font-bold">Earn points for correct answers. Hints are limited!</p>
+            <button id="start-button" class="bg-lime-600 hover:bg-lime-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-transform transform hover:scale-105">
+                Start Game
+            </button>
+        </div>
+
+        <!-- Game Info and UI -->
+        <div id="game-main-content" class="space-y-4 hidden">
+            <!-- Score and Timer Display -->
+            <div class="flex justify-around items-center text-xl text-gray-800">
+                <p>Score: <span id="score" class="font-bold">0</span></p>
+                <p>Time: <span id="timer" class="font-bold">20</span>s</p>
+            </div>
+            
+            <!-- Challenge Display Area -->
+            <div id="challenge-container" class="min-h-[100px] flex flex-col items-center justify-center">
+                <div id="scrambled-word" class="text-3xl font-extrabold text-lime-800 my-4 text-center"></div>
+                <p id="challenge-text" class="text-gray-700 font-normal text-xl px-4"></p>
+                <input type="text" id="user-input" class="w-full max-w-sm p-3 text-center text-2xl font-bold text-gray-700 bg-gray-100 rounded-lg border-2 border-gray-300 focus:outline-none focus:border-lime-500" placeholder="Type your answer...">
+            </div>
+
+            <!-- Feedback Message -->
+            <p id="feedback-message" class="text-lg font-semibold h-6 text-gray-700 mt-4"></p>
+
+            <!-- Buttons -->
+            <div id="game-buttons" class="flex flex-col sm:flex-row justify-center space-y-4 sm:space-y-0 sm:space-x-4 mt-6">
+                <button id="check-button" class="bg-lime-600 hover:bg-lime-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-transform transform hover:scale-105">
+                    Check
+                </button>
+                <button id="hint-button" class="bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-transform transform hover:scale-105">
+                    Hint
+                </button>
+            </div>
+
+            <!-- Hint Display -->
+            <div id="hint-display" class="mt-8 text-xl text-gray-700 font-semibold p-4 rounded-lg bg-gray-100 border-l-4 border-yellow-500">
+                <p>Click "Hint" for a clue! (<span id="hints-remaining">3</span> left)</p>
+            </div>
+            
+        </div>
+
+        <!-- Score Summary & Share Link Section -->
+        <div class="mt-12 hidden" id="game-over-container">
+            <h3 class="text-3xl font-bold text-gray-700 mb-4">Game Over!</h3>
+            <div class="bg-gray-100 p-6 rounded-xl shadow-inner flex flex-col items-center justify-center space-y-4">
+                <p id="final-score-text" class="text-3xl font-bold text-lime-800 my-2">Your Final Score: 0</p>
+                <p id="high-score-text" class="text-2xl font-semibold text-gray-700">Personal Best: 0</p>
+                
+                <!-- New Local Leaderboard UI -->
+                <div class="w-full mt-6 space-y-3">
+                    <p class="text-lg text-gray-700 font-semibold">Enter your name to add your score to the leaderboard!</p>
+                    <input type="text" id="player-name-input" class="w-full p-2 text-center text-lg rounded-lg border-2 border-lime-300 focus:outline-none focus:border-lime-500" placeholder="Your Name">
+                    <button id="save-score-button" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-transform transform hover:scale-105 w-full">
+                        Save Score
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Leaderboard Section -->
+        <div class="mt-12">
+            <h3 class="text-3xl font-bold text-gray-700 mb-4">Top 10 Scores</h3>
+            <div id="leaderboard-list" class="bg-gray-100 p-4 rounded-xl shadow-inner min-h-[150px] flex items-center justify-center">
+                <p class="text-gray-500">No scores yet. Be the first to play!</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Game state variables
+        const MAX_HINTS = 3;
+        let hintsUsed = 0;
+        let currentChallengeIndex = 0;
+        let score = 0;
+        let seconds = 20;
+        let timerInterval;
+        let personalHighScore = 0; // New variable to store the high score for the session
+
+        // Combined array of all challenges with harder hints
+        const challenges = [
+            // Word Unscramble (5)
+            { type: "unscramble", word: "kalooban", hint: "It refers to one's inner being or spirit." },
+            { type: "unscramble", word: "balintataw", hint: "The part of the eye that adjusts to light." },
+            { type: "unscramble", word: "agam-agam", hint: "A feeling of uncertainty." },
+            { type: "unscramble", word: "pagkakabuklod", hint: "It means to be bound together or to have solidarity." },
+            { type: "unscramble", word: "kasarinlan", hint: "The right of a nation  to govern themselves." },
+            
+            // Bugtong-bugtong (Riddles, 5)
+            { type: "bugtong", question: "Bugtong-bugtong, isang butil na bigas, sinasakop ang buong bahay.", answer: "ilaw", hint: "A tiny item that brightens up a whole room." },
+            { type: "bugtong", question: "Bugtong-bugtong, nagtago si Pedro sa likod ng pinto, nakita ang buong mundo.", answer: "salamin", hint: "It lets you see yourself." },
+            { type: "bugtong", question: "Bugtong-bugtong, may katawan, walang mukha, may kamay, walang daliri.", answer: "orasan", hint: "This object has two 'hands' that never touch, telling you something important." },
+            { type: "bugtong", question: "Bugtong-bugtong, maliit na bahay, puno ng yaman.", answer: "itlog", hint: "A common breakfast food that comes in a shell." },
+            { type: "bugtong", question: "Bugtong-bugtong, kahit na laging tinatawid, hindi kailanman naglalakad.", answer: "tulay", hint: "A structure built to help people get across a gap, like a river or a road." },
+            
+            // Salawikain (Proverb/Idiom Completion, 3)
+            { type: "salawikain", question: "Aanhin pa ang damo kung patay na ang _______.", answer: "kabayo", hint: "A proverb about useless effort after the fact." },
+            { type: "salawikain", question: "Ang mag-ingat sa papuri ay parang nag-iingat sa ______.", answer: "paninira", hint: "It's about being cautious with flattery." },
+            { type: "salawikain", question: "Ang hindi lumingon sa pinanggalingan, hindi _______ sa paroroonan.", answer: "makararating", hint: "If you don't look back, you won't get there." },
+            
+            // Pagsasalin (Translation, 3)
+            { type: "translation", question: "What is the Filipino word for the spirit of communal unity, cooperation, and the willingness to help others?", answer: "bayanihan", hint: "This is a very well-known Filipino value, often associated with a community helping to move a house." },
+            { type: "translation", question: "What is the Filipino word for the act of playfully splashing in shallow water?", answer: "tampisaw", hint: "It describes a playful action, usually in a body of water like a river or the sea." },
+            { type: "translation", question: "What Filipino idiom, which literally translates to 'heavy blood', means that two people don't get along?", answer: "mabigat ang dugo", hint: "The phrase is used to describe a strong, negative feeling towards a person, like a dislike or a strong aversion." },
+            
+            // Filipino Trivia (4)
+            { type: "trivia", question: "What is the ancient Filipino writing system called?", answer: "baybayin", hint: "It's a pre-colonial syllabic script." },
+            { type: "trivia", question: "Who is the first Filipino to be named National Artist of the Philippines for Painting, known for his landscapes and rural genre scenes?", answer: "fernando amorsolo", hint: "His famous works include 'The First Filipino,' 'Dalagang Filipina,' and 'Bayanihan'." },
+            { type: "trivia", question: "What is the name of the Philippine mythical creature that is a half-man, half-horse being?", answer: "tikbalang", hint: "It is known for leading travelers astray in forests." },
+            { type: "trivia", question: "What is the indigenous Filipino art of tattooing called, practiced by a legendary artist from Kalinga?", answer: "batok", hint: "The famous practitioner of this art is Apo Whang-Od." }
+        ];
+
+        // DOM elements
+        const startScreenEl = document.getElementById('start-screen');
+        const startButton = document.getElementById('start-button');
+        const gameMainContentEl = document.getElementById('game-main-content');
+        const scrambledWordEl = document.getElementById('scrambled-word');
+        const challengeTextEl = document.getElementById('challenge-text');
+        const userInputEl = document.getElementById('user-input');
+        const feedbackMessageEl = document.getElementById('feedback-message');
+        const scoreEl = document.getElementById('score');
+        const timerEl = document.getElementById('timer');
+        const checkButton = document.getElementById('check-button');
+        const hintButton = document.getElementById('hint-button');
+        const hintDisplayEl = document.getElementById('hint-display');
+        const hintsRemainingEl = document.getElementById('hints-remaining');
+        const gameOverContainerEl = document.getElementById('game-over-container');
+        const finalScoreTextEl = document.getElementById('final-score-text');
+        const highScoreTextEl = document.getElementById('high-score-text');
+        const playerNameInputEl = document.getElementById('player-name-input');
+        const saveScoreButton = document.getElementById('save-score-button');
+        const leaderboardListEl = document.getElementById('leaderboard-list');
+        const gameButtonsContainer = document.getElementById('game-buttons');
+        const challengeContainer = document.getElementById('challenge-container');
+
+
+        // Function to shuffle letters of a word
+        function shuffleWord(word) {
+            let shuffled = word.split('').sort(() => 0.5 - Math.random()).join('');
+            while (shuffled === word) {
+                shuffled = word.split('').sort(() => 0.5 - Math.random()).join('');
+            }
+            return shuffled.toUpperCase();
+        }
+
+        // Function to shuffle the entire array of challenges
+        function shuffleArray(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+        }
+
+        // Function to start the timer (now a countdown)
+        function startTimer() {
+            seconds = 20;
+            timerEl.textContent = seconds;
+            timerInterval = setInterval(() => {
+                seconds--;
+                timerEl.textContent = seconds;
+                if (seconds <= 0) {
+                    stopTimer();
+                    const correctWord = challenges[currentChallengeIndex - 1].type === 'unscramble' ? challenges[currentChallengeIndex - 1].word.toUpperCase() : challenges[currentChallengeIndex - 1].answer.toUpperCase();
+                    feedbackMessageEl.textContent = `Time's up! The correct answer was "${correctWord}".`;
+                    feedbackMessageEl.style.color = 'red';
+                    userInputEl.disabled = true;
+                    // FIX: Disable the check button when time is up to prevent "timebeater" answers
+                    checkButton.disabled = true;
+                    setTimeout(loadNextChallenge, 3000);
+                }
+            }, 1000);
+        }
+
+        // Function to stop the timer
+        function stopTimer() {
+            clearInterval(timerInterval);
+        }
+
+        // Function to load a new challenge
+        function loadNextChallenge() {
+            stopTimer();
+
+            if (currentChallengeIndex >= challenges.length) {
+                endGame();
+                return;
+            }
+            
+            // Check if hints are available for the new challenge
+            if (hintsUsed >= MAX_HINTS) {
+                hintButton.disabled = true;
+                hintDisplayEl.innerHTML = `<p>You have used all your hints!</p>`;
+            } else {
+                hintButton.disabled = false;
+                hintsRemainingEl.textContent = MAX_HINTS - hintsUsed;
+                hintDisplayEl.innerHTML = `<p>Click "Hint" for a clue! (<span id="hints-remaining">${MAX_HINTS - hintsUsed}</span> left)</p>`;
+            }
+
+            const currentChallenge = challenges[currentChallengeIndex];
+
+            // Reset UI elements and disable buttons for transition
+            userInputEl.value = '';
+            feedbackMessageEl.textContent = 'Loading next challenge...';
+            feedbackMessageEl.style.color = 'gray';
+            checkButton.disabled = true;
+            hintButton.disabled = true;
+            userInputEl.disabled = true;
+            
+            // Use a short delay to ensure UI updates before the new content loads
+            setTimeout(() => {
+                // Show/hide UI elements based on challenge type
+                if (currentChallenge.type === 'unscramble') {
+                    const scrambled = shuffleWord(currentChallenge.word);
+                    scrambledWordEl.textContent = scrambled;
+                    scrambledWordEl.classList.remove('hidden');
+                    challengeTextEl.classList.add('hidden');
+                    scrambledWordEl.classList.add('bg-gray-200', 'rounded-xl', 'p-4', 'inline-block', 'shadow-inner', 'min-w-[250px]');
+                } else {
+                    challengeTextEl.textContent = currentChallenge.question;
+                    scrambledWordEl.classList.add('hidden');
+                    challengeTextEl.classList.remove('hidden');
+                }
+
+                // Re-enable buttons and input
+                checkButton.disabled = false;
+                hintButton.disabled = false;
+                userInputEl.disabled = false;
+                feedbackMessageEl.textContent = ''; // Clear the loading message
+
+                startTimer();
+                currentChallengeIndex++;
+            }, 500); // 500ms delay for a smooth transition
+        }
+
+        // Function to end the game
+        function endGame() {
+            stopTimer();
+            gameMainContentEl.classList.add('hidden');
+            gameOverContainerEl.classList.remove('hidden');
+            
+            // Update the personal high score if the current score is higher
+            if (score > personalHighScore) {
+                personalHighScore = score;
+            }
+
+            // Update the score summary section with the final score and high score
+            finalScoreTextEl.textContent = `Your Final Score: ${score}`;
+            highScoreTextEl.textContent = `Personal Best: ${personalHighScore}`;
+            
+            // Load and display the leaderboard
+            loadLeaderboard();
+        }
+
+        // --- Leaderboard Functions using LocalStorage ---
+        const LEADERBOARD_KEY = "salindiwa_leaderboard";
+
+        function saveScoreToLeaderboard(name, score) {
+            const leaderboard = loadLeaderboard();
+            leaderboard.push({ name: name, score: score });
+            
+            // Sort in descending order and keep only the top 10
+            leaderboard.sort((a, b) => b.score - a.score);
+            const topScores = leaderboard.slice(0, 10);
+            
+            localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(topScores));
+            renderLeaderboard(topScores);
+        }
+
+        function loadLeaderboard() {
+            const leaderboardJSON = localStorage.getItem(LEADERBOARD_KEY);
+            return leaderboardJSON ? JSON.parse(leaderboardJSON) : [];
+        }
+
+        function renderLeaderboard(leaderboard) {
+            leaderboardListEl.innerHTML = '';
+            if (leaderboard.length === 0) {
+                leaderboardListEl.innerHTML = `<p class="text-gray-500">No scores yet. Be the first to play!</p>`;
+                return;
+            }
+            
+            const listEl = document.createElement('ol');
+            listEl.className = "list-decimal list-inside space-y-2";
+            
+            leaderboard.forEach(entry => {
+                const li = document.createElement('li');
+                li.className = "flex justify-between items-center text-gray-800 text-lg";
+                li.innerHTML = `
+                    <span class="font-bold">${entry.name}</span>
+                    <span class="font-semibold text-lime-700">${entry.score} pts</span>
+                `;
+                listEl.appendChild(li);
+            });
+            
+            leaderboardListEl.appendChild(listEl);
+        }
+        // --- End of Leaderboard Functions ---
+
+        // Event listener for the "Check" button
+        checkButton.addEventListener('click', () => {
+            const userAnswer = userInputEl.value.trim().toLowerCase();
+            const currentChallenge = challenges[currentChallengeIndex - 1];
+            const correctWord = currentChallenge.type === 'unscramble' ? currentChallenge.word.toLowerCase() : currentChallenge.answer.toLowerCase();
+
+            if (userAnswer === correctWord) {
+                stopTimer();
+                score++;
+                scoreEl.textContent = score;
+                feedbackMessageEl.textContent = "Correct! Magaling!";
+                feedbackMessageEl.style.color = 'green';
+                userInputEl.disabled = true;
+                setTimeout(loadNextChallenge, 2000); // Wait 2s before loading the next challenge for user feedback
+            } else {
+                stopTimer();
+                const correctDisplayWord = currentChallenge.type === 'unscramble' ? currentChallenge.word.toUpperCase() : currentChallenge.answer.toUpperCase();
+                feedbackMessageEl.textContent = `Incorrect! The correct answer was "${correctDisplayWord}".`;
+                feedbackMessageEl.style.color = 'red';
+                userInputEl.disabled = true;
+                setTimeout(loadNextChallenge, 3000); // Move to the next question automatically
+            }
+        });
+
+        // Event listener for the "Hint" button
+        hintButton.addEventListener('click', () => {
+            if (hintsUsed < MAX_HINTS) {
+                const hint = challenges[currentChallengeIndex - 1].hint;
+                hintDisplayEl.innerHTML = `<p>${hint} (<span id="hints-remaining">${MAX_HINTS - (hintsUsed + 1)}</span> left)</p>`;
+                hintsUsed++;
+                hintsRemainingEl.textContent = MAX_HINTS - hintsUsed;
+            } else {
+                hintDisplayEl.textContent = "You have used all your hints!";
+                hintButton.disabled = true;
+            }
+        });
+
+        // Event listener for the start button
+        startButton.addEventListener('click', () => {
+            startScreenEl.classList.add('hidden');
+            gameOverContainerEl.classList.add('hidden'); // Hide game over screen on new game
+            gameMainContentEl.classList.remove('hidden');
+            shuffleArray(challenges); // Shuffle challenges at the beginning
+            score = 0; // Reset score on new game
+            scoreEl.textContent = score; // Update score display
+            loadNextChallenge();
+        });
+
+        // Event listener for the "Save Score" button
+        saveScoreButton.addEventListener('click', () => {
+            const playerName = playerNameInputEl.value.trim() || 'Anonymous';
+            saveScoreToLeaderboard(playerName, score);
+            // Hide the save score section after saving
+            document.querySelector('#game-over-container .w-full.mt-6.space-y-3').classList.add('hidden');
+        });
+
+        // Initial render of the leaderboard
+        window.onload = () => {
+            const leaderboard = loadLeaderboard();
+            renderLeaderboard(leaderboard);
+        };
+    </script>
+</body>
+</html>
