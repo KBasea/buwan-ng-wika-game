@@ -13,6 +13,27 @@
             font-family: 'Inter', sans-serif;
             background-color: #f7f3e9;
         }
+        /* Custom message box styling */
+        .custom-message-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .custom-message-box {
+            background-color: white;
+            padding: 2rem;
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            max-width: 90%;
+            text-align: center;
+        }
     </style>
 </head>
 <body class="flex items-center justify-center min-h-screen p-4">
@@ -63,37 +84,146 @@
             <div id="hint-display" class="mt-8 text-xl text-gray-700 font-semibold p-4 rounded-lg bg-gray-100 border-l-4 border-yellow-500">
                 <p>Click "Hint" for a clue! (<span id="hints-remaining">3</span> left)</p>
             </div>
-            
         </div>
 
-        <!-- Score Summary & Share Link Section -->
+        <!-- Score Summary Section -->
         <div class="mt-12 hidden" id="game-over-container">
             <h3 class="text-3xl font-bold text-gray-700 mb-4">Game Over!</h3>
             <div class="bg-gray-100 p-6 rounded-xl shadow-inner flex flex-col items-center justify-center space-y-4">
                 <p id="final-score-text" class="text-3xl font-bold text-lime-800 my-2">Your Final Score: 0</p>
-                <p id="high-score-text" class="text-2xl font-semibold text-gray-700">Personal Best: 0</p>
-                
-                <!-- New Local Leaderboard UI -->
-                <div class="w-full mt-6 space-y-3">
-                    <p class="text-lg text-gray-700 font-semibold">Enter your name to add your score to the leaderboard!</p>
-                    <input type="text" id="player-name-input" class="w-full p-2 text-center text-lg rounded-lg border-2 border-lime-300 focus:outline-none focus:border-lime-500" placeholder="Your Name">
-                    <button id="save-score-button" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-transform transform hover:scale-105 w-full">
-                        Save Score
-                    </button>
-                </div>
+                <button id="save-score-button" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-xl shadow-lg transition-transform transform hover:scale-105">
+                    Save Score to Leaderboard
+                </button>
             </div>
         </div>
 
         <!-- Leaderboard Section -->
         <div class="mt-12">
-            <h3 class="text-3xl font-bold text-gray-700 mb-4">Top 10 Scores</h3>
-            <div id="leaderboard-list" class="bg-gray-100 p-4 rounded-xl shadow-inner min-h-[150px] flex items-center justify-center">
+            <h3 class="text-3xl font-bold text-gray-700 mb-4">Global Leaderboard</h3>
+            <div id="loading-message" class="text-gray-500 font-semibold mb-4">Loading leaderboard...</div>
+            <div id="leaderboard-list" class="bg-gray-100 p-4 rounded-xl shadow-inner min-h-[150px] mt-4 flex items-center justify-center">
                 <p class="text-gray-500">No scores yet. Be the first to play!</p>
             </div>
         </div>
     </div>
+    
+    <!-- Custom Message Box for alerts and prompts -->
+    <div id="custom-message-box" class="custom-message-overlay hidden">
+        <div class="bg-white p-6 rounded-xl shadow-lg flex flex-col items-center justify-center text-center space-y-4">
+            <p id="custom-message-text" class="text-lg text-gray-800"></p>
+            <input type="text" id="custom-message-input" class="w-full p-2 text-center text-lg rounded-lg border-2 border-gray-300 focus:outline-none focus:border-blue-500 hidden" placeholder="Your Name">
+            <div id="custom-message-buttons" class="flex space-x-4">
+                <button id="custom-message-ok" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-xl">OK</button>
+                <button id="custom-message-cancel" class="bg-gray-400 hover:bg-gray-500 text-white font-bold py-2 px-4 rounded-xl hidden">Cancel</button>
+            </div>
+        </div>
+    </div>
 
-    <script>
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, addDoc, onSnapshot, collection, query, orderBy, limit } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global variables provided by the environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let db = null;
+        let auth = null;
+        let userId = null;
+
+        // --- Firebase Initialization and Authentication ---
+        async function initializeFirebase() {
+            try {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                
+                userId = auth.currentUser.uid;
+                console.log("Firebase authenticated successfully with user ID:", userId);
+
+                // Start listening for leaderboard changes after auth
+                listenForLeaderboardChanges();
+            } catch (error) {
+                console.error("Firebase initialization or authentication failed:", error);
+                showMessage("Could not connect to the global leaderboard. The game will run in offline mode.");
+            }
+        }
+        
+        // --- Leaderboard Functions using Firestore ---
+        function listenForLeaderboardChanges() {
+            if (!db) return;
+            const leaderboardCollectionRef = collection(db, `/artifacts/${appId}/public/data/leaderboard`);
+            const q = query(leaderboardCollectionRef, orderBy("score", "desc"), limit(10));
+
+            // Use onSnapshot to listen for real-time updates
+            onSnapshot(q, (snapshot) => {
+                const newLeaderboard = [];
+                snapshot.forEach((doc) => {
+                    newLeaderboard.push(doc.data());
+                });
+                renderLeaderboard(newLeaderboard);
+                document.getElementById('loading-message').classList.add('hidden');
+            }, (error) => {
+                console.error("Error fetching leaderboard:", error);
+                document.getElementById('loading-message').textContent = "Failed to load leaderboard.";
+            });
+        }
+
+        async function saveScoreToLeaderboard(playerName, finalScore) {
+            if (!db) {
+                showMessage("Cannot save score. Not connected to a live leaderboard.");
+                return;
+            }
+
+            try {
+                await addDoc(collection(db, `/artifacts/${appId}/public/data/leaderboard`), {
+                    name: playerName,
+                    score: finalScore,
+                    timestamp: new Date().getTime()
+                });
+                console.log("Score saved successfully!");
+                showMessage("Your score has been saved to the global leaderboard!");
+            } catch (e) {
+                console.error("Error saving score:", e);
+                showMessage("There was an error saving your score.");
+            }
+        }
+
+        function renderLeaderboard(leaderboardData) {
+            const leaderboardListEl = document.getElementById('leaderboard-list');
+            leaderboardListEl.innerHTML = '';
+            if (leaderboardData.length === 0) {
+                leaderboardListEl.innerHTML = `<p class="text-gray-500">No scores yet. Be the first to play!</p>`;
+                return;
+            }
+
+            const listEl = document.createElement('ol');
+            listEl.className = "list-decimal list-inside space-y-2";
+
+            leaderboardData.forEach(entry => {
+                const li = document.createElement('li');
+                li.className = "flex justify-between items-center text-gray-800 text-lg";
+                li.innerHTML = `
+                    <span class="font-bold">${entry.name || 'Anonymous'}</span>
+                    <span class="font-semibold text-lime-700">${entry.score} pts</span>
+                `;
+                listEl.appendChild(li);
+            });
+
+            leaderboardListEl.appendChild(listEl);
+        }
+
+        // --- Game Logic and UI Functions (same as previous versions) ---
+
         // Game state variables
         const MAX_HINTS = 3;
         let hintsUsed = 0;
@@ -101,35 +231,24 @@
         let score = 0;
         let seconds = 20;
         let timerInterval;
-        let personalHighScore = 0; // New variable to store the high score for the session
 
-        // Combined array of all challenges with harder hints
         const challenges = [
-            // Word Unscramble (5)
             { type: "unscramble", word: "kalooban", hint: "It refers to one's inner being or spirit." },
             { type: "unscramble", word: "balintataw", hint: "The part of the eye that adjusts to light." },
             { type: "unscramble", word: "agam-agam", hint: "A feeling of uncertainty." },
             { type: "unscramble", word: "pagkakabuklod", hint: "It means to be bound together or to have solidarity." },
-            { type: "unscramble", word: "kasarinlan", hint: "The right of a nation  to govern themselves." },
-            
-            // Bugtong-bugtong (Riddles, 5)
+            { type: "unscramble", word: "kasarinlan", hint: "The right of a nation to govern themselves." },
             { type: "bugtong", question: "Bugtong-bugtong, isang butil na bigas, sinasakop ang buong bahay.", answer: "ilaw", hint: "A tiny item that brightens up a whole room." },
             { type: "bugtong", question: "Bugtong-bugtong, nagtago si Pedro sa likod ng pinto, nakita ang buong mundo.", answer: "salamin", hint: "It lets you see yourself." },
             { type: "bugtong", question: "Bugtong-bugtong, may katawan, walang mukha, may kamay, walang daliri.", answer: "orasan", hint: "This object has two 'hands' that never touch, telling you something important." },
             { type: "bugtong", question: "Bugtong-bugtong, maliit na bahay, puno ng yaman.", answer: "itlog", hint: "A common breakfast food that comes in a shell." },
             { type: "bugtong", question: "Bugtong-bugtong, kahit na laging tinatawid, hindi kailanman naglalakad.", answer: "tulay", hint: "A structure built to help people get across a gap, like a river or a road." },
-            
-            // Salawikain (Proverb/Idiom Completion, 3)
             { type: "salawikain", question: "Aanhin pa ang damo kung patay na ang _______.", answer: "kabayo", hint: "A proverb about useless effort after the fact." },
             { type: "salawikain", question: "Ang mag-ingat sa papuri ay parang nag-iingat sa ______.", answer: "paninira", hint: "It's about being cautious with flattery." },
             { type: "salawikain", question: "Ang hindi lumingon sa pinanggalingan, hindi _______ sa paroroonan.", answer: "makararating", hint: "If you don't look back, you won't get there." },
-            
-            // Pagsasalin (Translation, 3)
             { type: "translation", question: "What is the Filipino word for the spirit of communal unity, cooperation, and the willingness to help others?", answer: "bayanihan", hint: "This is a very well-known Filipino value, often associated with a community helping to move a house." },
             { type: "translation", question: "What is the Filipino word for the act of playfully splashing in shallow water?", answer: "tampisaw", hint: "It describes a playful action, usually in a body of water like a river or the sea." },
             { type: "translation", question: "What Filipino idiom, which literally translates to 'heavy blood', means that two people don't get along?", answer: "mabigat ang dugo", hint: "The phrase is used to describe a strong, negative feeling towards a person, like a dislike or a strong aversion." },
-            
-            // Filipino Trivia (4)
             { type: "trivia", question: "What is the ancient Filipino writing system called?", answer: "baybayin", hint: "It's a pre-colonial syllabic script." },
             { type: "trivia", question: "Who is the first Filipino to be named National Artist of the Philippines for Painting, known for his landscapes and rural genre scenes?", answer: "fernando amorsolo", hint: "His famous works include 'The First Filipino,' 'Dalagang Filipina,' and 'Bayanihan'." },
             { type: "trivia", question: "What is the name of the Philippine mythical creature that is a half-man, half-horse being?", answer: "tikbalang", hint: "It is known for leading travelers astray in forests." },
@@ -152,15 +271,66 @@
         const hintsRemainingEl = document.getElementById('hints-remaining');
         const gameOverContainerEl = document.getElementById('game-over-container');
         const finalScoreTextEl = document.getElementById('final-score-text');
-        const highScoreTextEl = document.getElementById('high-score-text');
-        const playerNameInputEl = document.getElementById('player-name-input');
         const saveScoreButton = document.getElementById('save-score-button');
-        const leaderboardListEl = document.getElementById('leaderboard-list');
-        const gameButtonsContainer = document.getElementById('game-buttons');
-        const challengeContainer = document.getElementById('challenge-container');
 
+        // Custom message box elements
+        const customMessageBox = document.getElementById('custom-message-box');
+        const customMessageText = document.getElementById('custom-message-text');
+        const customMessageInput = document.getElementById('custom-message-input');
+        const customMessageOk = document.getElementById('custom-message-ok');
+        const customMessageCancel = document.getElementById('custom-message-cancel');
+        
+        /**
+         * Displays a simple message box with an OK button.
+         * @param {string} message The message to display.
+         * @param {Function} [onConfirm] An optional function to call when OK is clicked.
+         */
+        function showMessage(message, onConfirm) {
+            customMessageText.textContent = message;
+            customMessageInput.classList.add('hidden');
+            customMessageCancel.classList.add('hidden');
+            customMessageBox.classList.remove('hidden');
 
-        // Function to shuffle letters of a word
+            const okHandler = () => {
+                customMessageBox.classList.add('hidden');
+                if (onConfirm) onConfirm();
+                customMessageOk.removeEventListener('click', okHandler);
+            };
+
+            customMessageOk.addEventListener('click', okHandler);
+        }
+
+        /**
+         * Displays a prompt box with an input field.
+         * @param {string} message The message to display.
+         * @param {Function} onOk A function to call when OK is clicked, with the input value as an argument.
+         * @param {Function} [onCancel] An optional function to call when Cancel is clicked.
+         */
+        function showPrompt(message, onOk, onCancel) {
+            customMessageText.textContent = message;
+            customMessageInput.value = '';
+            customMessageInput.classList.remove('hidden');
+            customMessageCancel.classList.remove('hidden');
+            customMessageBox.classList.remove('hidden');
+
+            const okHandler = () => {
+                customMessageBox.classList.add('hidden');
+                onOk(customMessageInput.value);
+                customMessageOk.removeEventListener('click', okHandler);
+                customMessageCancel.removeEventListener('click', cancelHandler);
+            };
+
+            const cancelHandler = () => {
+                customMessageBox.classList.add('hidden');
+                if (onCancel) onCancel();
+                customMessageOk.removeEventListener('click', okHandler);
+                customMessageCancel.removeEventListener('click', cancelHandler);
+            };
+
+            customMessageOk.addEventListener('click', okHandler);
+            customMessageCancel.addEventListener('click', cancelHandler);
+        }
+
         function shuffleWord(word) {
             let shuffled = word.split('').sort(() => 0.5 - Math.random()).join('');
             while (shuffled === word) {
@@ -169,7 +339,6 @@
             return shuffled.toUpperCase();
         }
 
-        // Function to shuffle the entire array of challenges
         function shuffleArray(array) {
             for (let i = array.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
@@ -177,7 +346,6 @@
             }
         }
 
-        // Function to start the timer (now a countdown)
         function startTimer() {
             seconds = 20;
             timerEl.textContent = seconds;
@@ -190,19 +358,16 @@
                     feedbackMessageEl.textContent = `Time's up! The correct answer was "${correctWord}".`;
                     feedbackMessageEl.style.color = 'red';
                     userInputEl.disabled = true;
-                    // FIX: Disable the check button when time is up to prevent "timebeater" answers
                     checkButton.disabled = true;
                     setTimeout(loadNextChallenge, 3000);
                 }
             }, 1000);
         }
 
-        // Function to stop the timer
         function stopTimer() {
             clearInterval(timerInterval);
         }
 
-        // Function to load a new challenge
         function loadNextChallenge() {
             stopTimer();
 
@@ -211,7 +376,6 @@
                 return;
             }
             
-            // Check if hints are available for the new challenge
             if (hintsUsed >= MAX_HINTS) {
                 hintButton.disabled = true;
                 hintDisplayEl.innerHTML = `<p>You have used all your hints!</p>`;
@@ -223,7 +387,6 @@
 
             const currentChallenge = challenges[currentChallengeIndex];
 
-            // Reset UI elements and disable buttons for transition
             userInputEl.value = '';
             feedbackMessageEl.textContent = 'Loading next challenge...';
             feedbackMessageEl.style.color = 'gray';
@@ -231,9 +394,7 @@
             hintButton.disabled = true;
             userInputEl.disabled = true;
             
-            // Use a short delay to ensure UI updates before the new content loads
             setTimeout(() => {
-                // Show/hide UI elements based on challenge type
                 if (currentChallenge.type === 'unscramble') {
                     const scrambled = shuffleWord(currentChallenge.word);
                     scrambledWordEl.textContent = scrambled;
@@ -246,81 +407,25 @@
                     challengeTextEl.classList.remove('hidden');
                 }
 
-                // Re-enable buttons and input
                 checkButton.disabled = false;
                 hintButton.disabled = false;
                 userInputEl.disabled = false;
-                feedbackMessageEl.textContent = ''; // Clear the loading message
-
+                feedbackMessageEl.textContent = ''; 
                 startTimer();
                 currentChallengeIndex++;
-            }, 500); // 500ms delay for a smooth transition
+            }, 500); 
         }
 
-        // Function to end the game
         function endGame() {
             stopTimer();
             gameMainContentEl.classList.add('hidden');
             gameOverContainerEl.classList.remove('hidden');
             
-            // Update the personal high score if the current score is higher
-            if (score > personalHighScore) {
-                personalHighScore = score;
-            }
-
-            // Update the score summary section with the final score and high score
             finalScoreTextEl.textContent = `Your Final Score: ${score}`;
-            highScoreTextEl.textContent = `Personal Best: ${personalHighScore}`;
-            
-            // Load and display the leaderboard
-            loadLeaderboard();
         }
-
-        // --- Leaderboard Functions using LocalStorage ---
-        const LEADERBOARD_KEY = "salindiwa_leaderboard";
-
-        function saveScoreToLeaderboard(name, score) {
-            const leaderboard = loadLeaderboard();
-            leaderboard.push({ name: name, score: score });
-            
-            // Sort in descending order and keep only the top 10
-            leaderboard.sort((a, b) => b.score - a.score);
-            const topScores = leaderboard.slice(0, 10);
-            
-            localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(topScores));
-            renderLeaderboard(topScores);
-        }
-
-        function loadLeaderboard() {
-            const leaderboardJSON = localStorage.getItem(LEADERBOARD_KEY);
-            return leaderboardJSON ? JSON.parse(leaderboardJSON) : [];
-        }
-
-        function renderLeaderboard(leaderboard) {
-            leaderboardListEl.innerHTML = '';
-            if (leaderboard.length === 0) {
-                leaderboardListEl.innerHTML = `<p class="text-gray-500">No scores yet. Be the first to play!</p>`;
-                return;
-            }
-            
-            const listEl = document.createElement('ol');
-            listEl.className = "list-decimal list-inside space-y-2";
-            
-            leaderboard.forEach(entry => {
-                const li = document.createElement('li');
-                li.className = "flex justify-between items-center text-gray-800 text-lg";
-                li.innerHTML = `
-                    <span class="font-bold">${entry.name}</span>
-                    <span class="font-semibold text-lime-700">${entry.score} pts</span>
-                `;
-                listEl.appendChild(li);
-            });
-            
-            leaderboardListEl.appendChild(listEl);
-        }
-        // --- End of Leaderboard Functions ---
-
-        // Event listener for the "Check" button
+        
+        // --- Event Listeners ---
+        
         checkButton.addEventListener('click', () => {
             const userAnswer = userInputEl.value.trim().toLowerCase();
             const currentChallenge = challenges[currentChallengeIndex - 1];
@@ -333,18 +438,17 @@
                 feedbackMessageEl.textContent = "Correct! Magaling!";
                 feedbackMessageEl.style.color = 'green';
                 userInputEl.disabled = true;
-                setTimeout(loadNextChallenge, 2000); // Wait 2s before loading the next challenge for user feedback
+                setTimeout(loadNextChallenge, 2000); 
             } else {
                 stopTimer();
                 const correctDisplayWord = currentChallenge.type === 'unscramble' ? currentChallenge.word.toUpperCase() : currentChallenge.answer.toUpperCase();
                 feedbackMessageEl.textContent = `Incorrect! The correct answer was "${correctDisplayWord}".`;
                 feedbackMessageEl.style.color = 'red';
                 userInputEl.disabled = true;
-                setTimeout(loadNextChallenge, 3000); // Move to the next question automatically
+                setTimeout(loadNextChallenge, 3000); 
             }
         });
 
-        // Event listener for the "Hint" button
         hintButton.addEventListener('click', () => {
             if (hintsUsed < MAX_HINTS) {
                 const hint = challenges[currentChallengeIndex - 1].hint;
@@ -356,30 +460,34 @@
                 hintButton.disabled = true;
             }
         });
+        
+        saveScoreButton.addEventListener('click', () => {
+            if (score > 0) {
+                showPrompt("Enter your name to save your score to the global leaderboard:", (playerName) => {
+                    if (playerName) {
+                        saveScoreToLeaderboard(playerName, score);
+                    }
+                });
+            } else {
+                showMessage("Your score is 0. Play again to get on the leaderboard!");
+            }
+        });
 
-        // Event listener for the start button
         startButton.addEventListener('click', () => {
             startScreenEl.classList.add('hidden');
-            gameOverContainerEl.classList.add('hidden'); // Hide game over screen on new game
+            gameOverContainerEl.classList.add('hidden'); 
             gameMainContentEl.classList.remove('hidden');
-            shuffleArray(challenges); // Shuffle challenges at the beginning
-            score = 0; // Reset score on new game
-            scoreEl.textContent = score; // Update score display
+            shuffleArray(challenges); 
+            score = 0; 
+            scoreEl.textContent = score; 
+            currentChallengeIndex = 0; 
+            hintsUsed = 0;
             loadNextChallenge();
         });
 
-        // Event listener for the "Save Score" button
-        saveScoreButton.addEventListener('click', () => {
-            const playerName = playerNameInputEl.value.trim() || 'Anonymous';
-            saveScoreToLeaderboard(playerName, score);
-            // Hide the save score section after saving
-            document.querySelector('#game-over-container .w-full.mt-6.space-y-3').classList.add('hidden');
-        });
-
-        // Initial render of the leaderboard
+        // Initial setup on window load
         window.onload = () => {
-            const leaderboard = loadLeaderboard();
-            renderLeaderboard(leaderboard);
+            initializeFirebase();
         };
     </script>
 </body>
